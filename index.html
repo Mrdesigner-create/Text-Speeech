@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Text to Speech + True MP3 Download + Play</title>
+<style>
+body {
+  font-family: Arial, sans-serif;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  background: #f4f4f4;
+}
+textarea, select, input {
+  width: 80%;
+  margin-bottom: 10px;
+  font-size: 16px;
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px solid #ccc;
+}
+textarea { height: 200px; }
+button {
+  padding: 10px 20px;
+  font-size: 16px;
+  border: none;
+  border-radius: 8px;
+  background: #007bff;
+  color: white;
+  cursor: pointer;
+  margin: 5px;
+}
+button:hover { background: #0056b3; }
+label { font-weight: bold; margin-top: 5px; font-size: 14px; }
+.control-group { width: 80%; display: flex; align-items: center; justify-content: space-between; margin: 4px 0; }
+.control-group input[type="range"] { width: 50%; }
+.control-group span { font-weight: normal; font-size: 13px; }
+</style>
+</head>
+<body>
+<h1>💡 Text to Speech + MP3 Download + Play</h1>
+
+<textarea id="text" placeholder="Type your text here..."></textarea>
+<input type="text" id="voiceSearch" placeholder="Search voice..." oninput="filterVoices()">
+<select id="voiceSelect" size="6"></select>
+
+<div class="control-group">
+  <label>Speed: <span id="rateVal">1</span></label>
+  <input type="range" id="rate" min="0.5" max="2" step="0.1" value="1" oninput="document.getElementById('rateVal').textContent=this.value">
+</div>
+<div class="control-group">
+  <label>Pitch: <span id="pitchVal">1</span></label>
+  <input type="range" id="pitch" min="0" max="2" step="0.1" value="1" oninput="document.getElementById('pitchVal').textContent=this.value">
+</div>
+<div class="control-group">
+  <label>Volume: <span id="volumeVal">1</span></label>
+  <input type="range" id="volume" min="0" max="1" step="0.1" value="1" oninput="document.getElementById('volumeVal').textContent=this.value">
+</div>
+
+<button onclick="speakText()">🔊 Speak</button>
+<button onclick="downloadMP3()">⬇️ Download MP3</button>
+<audio id="audioPlay" controls style="margin-top:10px; display:none;"></audio>
+
+<script src="https://cdn.jsdelivr.net/npm/lamejs@1.2.0/lame.min.js"></script>
+<script>
+let voices=[];
+let allVoices=[];
+
+function loadVoices(){
+  allVoices = speechSynthesis.getVoices();
+  voices=[...allVoices];
+  renderVoices();
+}
+
+function renderVoices(){
+  const select=document.getElementById("voiceSelect");
+  const selectedValue=select.value;
+  select.innerHTML="";
+  voices.forEach(v=>{
+    const option=document.createElement("option");
+    option.value=v.name;
+    option.textContent=v.name+" ("+v.lang+")";
+    if(v.name===selectedValue) option.selected=true;
+    select.appendChild(option);
+  });
+  if(!selectedValue && select.options.length>0) select.options[0].selected=true;
+}
+
+function filterVoices(){
+  const search=document.getElementById("voiceSearch").value.toLowerCase();
+  voices=allVoices.filter(v=>v.name.toLowerCase().includes(search)||v.lang.toLowerCase().includes(search));
+  renderVoices();
+}
+
+function speakText(){
+  const text=document.getElementById("text").value;
+  if(!text.trim()){ alert("Please enter some text!"); return; }
+  speechSynthesis.cancel();
+  const utter=new SpeechSynthesisUtterance(text);
+  const select=document.getElementById("voiceSelect");
+  utter.voice=allVoices.find(v=>v.name===select.value);
+  utter.rate=parseFloat(document.getElementById("rate").value);
+  utter.pitch=parseFloat(document.getElementById("pitch").value);
+  utter.volume=parseFloat(document.getElementById("volume").value);
+  speechSynthesis.speak(utter);
+}
+
+// Convert TTS to MP3
+async function downloadMP3(){
+  const text=document.getElementById("text").value;
+  if(!text.trim()){ alert("Please enter some text!"); return; }
+
+  // Use SpeechSynthesis + Web Audio API to generate audio
+  const synth = window.speechSynthesis;
+  const utter=new SpeechSynthesisUtterance(text);
+  const select=document.getElementById("voiceSelect");
+  utter.voice=allVoices.find(v=>v.name===select.value);
+  utter.rate=parseFloat(document.getElementById("rate").value);
+  utter.pitch=parseFloat(document.getElementById("pitch").value);
+  utter.volume=parseFloat(document.getElementById("volume").value);
+
+  // Create AudioContext & MediaStreamDestination
+  const audioCtx = new AudioContext();
+  const dest = audioCtx.createMediaStreamDestination();
+  const mediaRecorder = new MediaRecorder(dest.stream);
+  let chunks=[];
+
+  mediaRecorder.ondataavailable=e=>chunks.push(e.data);
+  mediaRecorder.onstop=()=>{
+    // Convert WebM to WAV/MP3 using Lame.js
+    const reader = new FileReader();
+    reader.onload = function(){
+      const arrayBuffer = reader.result;
+      audioCtx.decodeAudioData(arrayBuffer, function(audioBuffer){
+        const left = audioBuffer.getChannelData(0);
+        const mp3encoder = new lamejs.Mp3Encoder(1, audioBuffer.sampleRate, 128);
+        const samples = left;
+        const mp3Data = [];
+        let sampleBlockSize = 1152;
+        for(let i=0;i<samples.length;i+=sampleBlockSize){
+          const sampleChunk = samples.subarray(i,i+sampleBlockSize);
+          const mp3buf = mp3encoder.encodeBuffer(sampleChunk);
+          if(mp3buf.length>0) mp3Data.push(mp3buf);
+        }
+        const mp3buf = mp3encoder.flush();
+        if(mp3buf.length>0) mp3Data.push(mp3buf);
+        const blob = new Blob(mp3Data,{type:'audio/mp3'});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href=url;
+        a.download='voice.mp3';
+        a.click();
+
+        const audioPlay=document.getElementById("audioPlay");
+        audioPlay.src=url;
+        audioPlay.style.display='block';
+        audioPlay.play();
+      });
+    };
+    reader.readAsArrayBuffer(new Blob(chunks));
+  };
+
+  mediaRecorder.start();
+  utter.volume = 0; // silent
+  utter.onend = ()=>mediaRecorder.stop();
+  synth.speak(utter);
+}
+
+window.speechSynthesis.onvoiceschanged = loadVoices;
+loadVoices();
+</script>
+</body>
+</html>
